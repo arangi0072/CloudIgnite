@@ -1,26 +1,37 @@
 package main
 
 import (
+	"errors"
 	"log"
+	"math/rand"
 	"time"
 
 	"cloudignite-auth/internal/db"
 	"cloudignite-auth/internal/repository"
+	"cloudignite-auth/internal/storage"
 
 	"github.com/joho/godotenv"
 )
 
+const workerConcurrency = 5
+
 func main() {
 
-	godotenv.Load()
-
+	_ = godotenv.Load()
 	db.Connect()
+	db.ConnectAuthDB()
+	db.ConnectStorageDB()
+
+	// ✅ VERY IMPORTANT
+	storage.InitMinio()
 
 	log.Println("Provisioning worker started...")
 
+	sem := make(chan struct{}, workerConcurrency)
+
 	for {
 
-		jobs, err := repository.FetchProvisioningJobs(5)
+		jobs, err := repository.FetchProvisioningJobs(10)
 		if err != nil {
 			log.Println("job fetch error:", err)
 			time.Sleep(3 * time.Second)
@@ -34,16 +45,34 @@ func main() {
 
 		for _, job := range jobs {
 
-			log.Println("Provisioning:", job.Type, job.ProjectID)
+			sem <- struct{}{}
 
-			err := provision(job)
+			go func(j repository.ServiceJob) {
 
-			if err != nil {
-				repository.MarkServiceFailed(job.ID, err.Error())
-				continue
-			}
+				defer func() { <-sem }()
 
-			repository.MarkServiceActive(job.ID)
+				log.Println("Provisioning:", j.Type, j.ProjectID)
+
+				if err := provision(j); err != nil {
+
+					if errors.Is(err, ErrAlreadyProcessed) {
+						log.Println("Already handled:", j.ID)
+						return
+					}
+
+					log.Println("Provision failed:", j.ID, err)
+
+					repository.MarkServiceFailed(
+						j.ID,
+						err.Error(),
+					)
+				}
+
+			}(job)
 		}
+
+		// 🔥 Prevent hot loop
+		time.Sleep(time.Millisecond *
+			time.Duration(200+rand.Intn(300)))
 	}
 }

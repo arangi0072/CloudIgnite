@@ -1,0 +1,22 @@
+# env
+.env
+
+# system files
+*.log
+*.out
+
+# binaries
+worker
+
+# OS junk
+.DS_Store
+
+# node / frontend
+node_modules/
+
+# build files
+dist/
+build/
+
+# private folders (IMPORTANT)
+../*

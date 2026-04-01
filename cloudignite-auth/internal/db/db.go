@@ -9,6 +9,7 @@ import (
 )
 
 var Pool *pgxpool.Pool
+var StoragePool *pgxpool.Pool
 
 func Connect() {
 	databaseURL := os.Getenv("DATABASE_URL")
@@ -19,4 +20,18 @@ func Connect() {
 	}
 
 	Pool = pool
+}
+
+func ConnectStorageDB() {
+
+	dsn := os.Getenv("STORAGE_DATABASE_URL")
+
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		log.Fatal("DB connection failed:", err)
+	}
+
+	StoragePool = pool
+
+	log.Println("Storage DB Connected")
 }

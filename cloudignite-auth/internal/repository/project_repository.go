@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"cloudignite-auth/internal/db"
 	"cloudignite-auth/internal/models"
@@ -65,13 +66,15 @@ func GetUserProjects(userID string) ([]models.Project, error) {
 	for rows.Next() {
 		var p models.Project
 
-		rows.Scan(
+		if err := rows.Scan(
 			&p.ID,
 			&p.Name,
 			&p.OwnerID,
 			&p.Region,
 			&p.CreatedAt,
-		)
+		); err != nil {
+			return nil, err
+		}
 
 		projects = append(projects, p)
 	}
@@ -117,4 +120,110 @@ func UserHasProjectAccess(userID, projectID string) bool {
 	).Scan(&exists)
 
 	return exists
+}
+
+func GetProject(projectID string, userID string) (*models.Project, error) {
+
+	var project models.Project
+
+	err := db.Pool.QueryRow(context.Background(),
+		`SELECT id, name, owner_id, region, status, deleted_at
+		 FROM projects
+		 WHERE id=$1 AND deleted_at IS NULL`,
+		projectID,
+	).Scan(
+		&project.ID,
+		&project.Name,
+		&project.OwnerID,
+		&project.Region,
+		&project.Status,
+		&project.DeletedAt,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &project, nil
+}
+
+func UpdateProject(projectID string, userID string, name string, region string) (bool, error) {
+
+	// verify membership
+	isOwner, err := IsProjectOwner(userID, projectID)
+	if err != nil {
+		return false, err
+	}
+
+	if !isOwner {
+		return false, errors.New("forbidden")
+	}
+
+	_, err = db.Pool.Exec(context.Background(),
+		`UPDATE projects
+		 SET name = COALESCE($1, name),
+		     region = COALESCE($2, region)
+		 WHERE id=$3`,
+		name,
+		region,
+		projectID,
+	)
+
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func DeleteProject(projectID string, userID string) (bool, error) {
+
+	// verify membership
+	isOwner, err := IsProjectOwner(userID, projectID)
+	if err != nil {
+		return false, err
+	}
+
+	if !isOwner {
+		return false, errors.New("forbidden")
+	}
+
+	_, err = db.Pool.Exec(context.Background(),
+		`UPDATE projects
+		 SET deleted_at = NOW()
+		 WHERE id=$1`,
+		projectID,
+	)
+
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+func RestoreProject(projectID string, userID string) (bool, error) {
+
+	// verify membership
+	isOwner, err := IsProjectOwner(userID, projectID)
+	if err != nil {
+		return false, err
+	}
+
+	if !isOwner {
+		return false, errors.New("forbidden")
+	}
+
+	_, err = db.Pool.Exec(context.Background(),
+		`UPDATE projects
+		 SET deleted_at = NULL
+		 WHERE id=$1`,
+		projectID,
+	)
+
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }

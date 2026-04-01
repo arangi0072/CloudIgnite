@@ -8,4 +8,6 @@ type Project struct {
 	OwnerID   string
 	Region    string
 	CreatedAt time.Time
+	Status    string
+	DeletedAt *time.Time
 }
