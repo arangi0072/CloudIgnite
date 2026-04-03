@@ -255,32 +255,61 @@ func Refresh(c *gin.Context) {
 
 	project := c.MustGet("project").(*repository.Project)
 
+	// hash incoming token
 	hash := utils.HashToken(req.RefreshToken)
 
+	// get session
 	userID, projectID, email, err := repository.GetSession(hash)
-
 	if err != nil {
-
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "invalid refresh token",
 		})
-
 		return
 	}
 
-	token, err := utils.GenerateAccessToken(
+	// 🚨 DELETE OLD TOKEN (rotation step)
+	err = repository.DeleteSession(hash)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to rotate token",
+		})
+		return
+	}
+
+	// ✅ generate new access token
+	accessToken, err := utils.GenerateAccessToken(
 		userID,
 		projectID,
 		email,
 		project.JWTSecret,
 	)
-
 	if err != nil {
 		return
 	}
 
+	// ✅ generate new refresh token
+	newRefreshToken, newHash, err := utils.GenerateRefreshToken()
+	if err != nil {
+		return
+	}
+
+	// store new session
+	err = repository.CreateSession(
+		projectID,
+		userID,
+		newHash,
+		email,
+		c.ClientIP(),
+		c.Request.UserAgent(),
+	)
+	if err != nil {
+		return
+	}
+
+	// 🎯 return both tokens
 	c.JSON(http.StatusOK, gin.H{
-		"access_token": token,
+		"access_token":  accessToken,
+		"refresh_token": newRefreshToken,
 	})
 }
 

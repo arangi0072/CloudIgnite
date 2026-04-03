@@ -60,6 +60,16 @@ func GetSession(hash string) (string, string, string, error) {
 	return userID, projectID, email, err
 }
 
+func DeleteSession(hash string) error {
+
+	_, err := db.AuthPool.Exec(context.Background(), `
+	DELETE FROM auth_sessions
+	WHERE refresh_token_hash=$1
+	`, hash)
+
+	return err
+}
+
 //////////////////////////////////////////////////////
 // REVOKE ONE
 //////////////////////////////////////////////////////
