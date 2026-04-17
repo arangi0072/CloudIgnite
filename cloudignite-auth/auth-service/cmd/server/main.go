@@ -42,6 +42,7 @@ func main() {
 
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
+	// router.Use(gin.BodyLimit("10MB"))
 
 	// Trusted proxies (IMPORTANT for security)
 
@@ -96,6 +97,7 @@ func main() {
 	// Auth routes
 
 	auth := router.Group("/v1/auth")
+	auth.Use(middleware.RateLimiter())
 	auth.Use(middleware.ProjectMiddleware())
 	auth.Use(middleware.QuotaMiddleware("auth", "api_calls"))
 
@@ -104,7 +106,6 @@ func main() {
 	// public
 	auth.POST("/signup", handler.Signup)
 	auth.POST("/login", handler.Login)
-	auth.POST("/token", handler.Token)
 	auth.POST("/refresh", handler.Refresh)
 	authPublic.GET("/verify-email", handler.VerifyEmail)
 	auth.POST("/forgot-password", handler.ForgotPassword)

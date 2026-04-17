@@ -16,78 +16,102 @@ import (
 )
 
 func QuotaMiddleware(serviceName string, metric string) gin.HandlerFunc {
-
 	return func(c *gin.Context) {
 
+		// 🔑 Get API Key
 		keyToken := c.GetHeader("x-api-key")
-
 		if keyToken == "" {
-			c.AbortWithStatusJSON(401,
-				gin.H{"error": "missing api key"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "missing api key",
+			})
 			return
 		}
 
+		// 🔐 Hash API Key
 		hash := sha256.Sum256([]byte(keyToken))
 		keyHash := hex.EncodeToString(hash[:])
 
+		// 📦 Fetch Project
 		project, err := repository.GetProjectByPKHash(keyHash)
+		if err != nil || project == nil || project.ID == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid api key",
+			})
+			return
+		}
 
 		projectID := project.ID
 
-		if projectID == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "project not found"})
-			c.Abort()
-			return
-		}
+		// 👉 Pass project to next handlers
+		c.Set("project", project)
 
-		// 🗓 month
-		month := time.Now().UTC().Format("2006-01")
+		// 🗓 Time Keys
+		now := time.Now().UTC()
+		month := now.Format("2006-01")
+		today := now.Format("2006-01-02")
 
-		// 🔑 key
-		key := fmt.Sprintf(
-			"usage:%s:%s:%s:%s",
-			projectID,
-			serviceName,
-			metric,
-			month,
+		dailyKey := fmt.Sprintf(
+			"usage_daily:%s:%s:%s:%s",
+			projectID, serviceName, metric, today,
 		)
 
-		// ⚡ increment
-		count, err := utils.RedisClient.Incr(utils.Ctx, key).Result()
-		if err != nil {
-			c.JSON(500, gin.H{"error": "redis error"})
-			c.Abort()
+		monthlyKey := fmt.Sprintf(
+			"usage:%s:%s:%s:%s",
+			projectID, serviceName, metric, month,
+		)
+
+		// ⚡ Redis Pipeline (better performance)
+		pipe := utils.RedisClient.TxPipeline()
+
+		_ = pipe.Incr(utils.Ctx, dailyKey)
+		monthlyCmd := pipe.Incr(utils.Ctx, monthlyKey)
+
+		_, redisErr := pipe.Exec(utils.Ctx)
+		if redisErr != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"error": "redis error",
+			})
 			return
 		}
 
-		// ⏳ expiry
+		count := monthlyCmd.Val()
+
+		// ⏳ Set Expiry (only first time)
 		if count == 1 {
+			// Monthly expiry
 			utils.RedisClient.Expire(
 				utils.Ctx,
-				key,
+				monthlyKey,
 				timeUntilMonthEnd(),
+			)
+
+			// Daily expiry
+			utils.RedisClient.Expire(
+				utils.Ctx,
+				dailyKey,
+				24*time.Hour,
 			)
 		}
 
-		// 📊 get quota
+		// 📊 Get Quota
 		quota, err := service.GetQuota(projectID)
 		if err != nil {
-			c.JSON(500, gin.H{"error": "quota fetch failed"})
-			c.Abort()
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"error": "quota fetch failed",
+			})
 			return
 		}
 
 		limit := resolveLimit(quota, serviceName, metric)
 
-		// 🚫 block
+		// 🚫 Enforce Limit
 		if limit > 0 && count > limit {
-			c.JSON(http.StatusTooManyRequests, gin.H{
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 				"error":  "quota exceeded",
 				"limit":  limit,
 				"used":   count,
 				"metric": metric,
 			})
-			c.Abort()
 			return
 		}
 
@@ -109,10 +133,14 @@ func resolveLimit(q models.Quotas, service, metric string) int64 {
 		return q.Functions.Invocations
 
 	case "storage":
-		if metric == "bandwidth" {
+		switch metric {
+		case "bandwidth":
 			return q.Storage.Bandwidth
+		case "storage":
+			return q.Storage.StorageUsed
+		default:
+			return q.Storage.StorageUsed
 		}
-		return q.Storage.StorageUsed
 	}
 
 	return 0

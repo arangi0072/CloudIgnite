@@ -68,24 +68,31 @@ func Login(c *gin.Context) {
 	ip := c.ClientIP()
 	userAgent := c.Request.UserAgent()
 
-	access, refresh, err := service.Login(
+	access, refresh, user, err := service.Login(
 		project.ID,
-		project.JWTSecret,
 		body.Email,
 		body.Password,
 		ip,
 		userAgent,
+		project.PrivateKey,
+		project.KeyID,
 	)
 
 	if err != nil {
 		c.JSON(http.StatusUnauthorized,
-			gin.H{"error": "invalid credentials", "err": err})
+			gin.H{"error": "invalid credentials"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"access_token":  access,
 		"refresh_token": refresh,
+		"expires_in":    240, // 🔥 add this
+		"user": gin.H{ // 🔥 add this
+			"id":       user.ID,
+			"email":    user.Email,
+			"verified": user.EmailVerified,
+		},
 	})
 }
 
@@ -110,9 +117,10 @@ func Token(c *gin.Context) {
 	access, refresh, err :=
 		service.RefreshToken(
 			body.RefreshToken,
-			project.JWTSecret,
 			c.ClientIP(),
 			c.Request.UserAgent(),
+			project.PrivateKey,
+			project.KeyID,
 		)
 
 	if err != nil {
@@ -246,7 +254,7 @@ func ResetPassword(c *gin.Context) {
 func Refresh(c *gin.Context) {
 
 	var req struct {
-		RefreshToken string `json:"refresh_token"`
+		RefreshToken string `json:"refreshToken"`
 	}
 
 	if err := c.BindJSON(&req); err != nil {
@@ -260,7 +268,12 @@ func Refresh(c *gin.Context) {
 
 	// get session
 	userID, projectID, email, err := repository.GetSession(hash)
+	println("req", req.RefreshToken)
+	println("user id", userID, "project id", projectID, "email", email, "err", err)
+	println("refresh token", req.RefreshToken)
+	println("hash", hash)
 	if err != nil {
+		println("error", err.Error())
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "invalid refresh token",
 		})
@@ -281,7 +294,8 @@ func Refresh(c *gin.Context) {
 		userID,
 		projectID,
 		email,
-		project.JWTSecret,
+		project.PrivateKey,
+		project.KeyID,
 	)
 	if err != nil {
 		return
@@ -310,32 +324,82 @@ func Refresh(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"access_token":  accessToken,
 		"refresh_token": newRefreshToken,
+		"expires_in":    240,
 	})
 }
-
-func RotateJWTSecret(c *gin.Context) {
+func RotateKeys(c *gin.Context) {
 
 	projectID := c.Param("id")
 
-	secret, _, err1 := utils.GenerateSecureToken()
+	////////////////////////////////////////////////////
+	// GENERATE NEW RSA KEYS
+	////////////////////////////////////////////////////
 
-	if err1 != nil {
+	privateKeyPEM, publicKeyPEM, err := utils.GenerateRSAKeys()
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to generate jwt secret",
+			"error": "failed to generate keys",
 		})
 		return
 	}
 
-	err := repository.UpdateJWTSecret(projectID, secret)
+	keyID, err := utils.GenerateSecureHex(8)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to generate key id",
+		})
+		return
+	}
+
+	////////////////////////////////////////////////////
+	// STORE NEW KEYS
+	////////////////////////////////////////////////////
+
+	err = repository.UpdateProjectKeys(
+		projectID,
+		privateKeyPEM,
+		publicKeyPEM,
+		keyID,
+	)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "failed to update jwt secret",
+			"error": "failed to update keys",
 		})
 		return
 	}
 
+	////////////////////////////////////////////////////
+	// OPTIONAL: CLEAR JWKS CACHE
+	////////////////////////////////////////////////////
+
+	utils.InvalidateJWKSCache(projectID)
+
 	c.JSON(http.StatusOK, gin.H{
-		"jwt_secret": secret,
+		"message": "keys rotated successfully",
+		"key_id":  keyID,
+	})
+}
+
+func GetJWKS(c *gin.Context) {
+
+	projectID := c.Param("project_id")
+
+	project, err := repository.GetProjectById(projectID)
+	if err != nil {
+		c.JSON(404, gin.H{"error": "not found"})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"keys": []gin.H{
+			{
+				"kid":        project.KeyID,
+				"alg":        "RS256",
+				"kty":        "RSA",
+				"use":        "sig",
+				"public_key": project.PublicKey,
+			},
+		},
 	})
 }

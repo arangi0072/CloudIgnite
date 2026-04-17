@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"crypto/rsa"
 	"errors"
 	"log"
 	"time"
@@ -12,8 +13,10 @@ import (
 )
 
 type Project struct {
-	ID        string `json:"project_id"`
-	JWTSecret string `json:"-"`
+	ID         string `json:"project_id"`
+	PrivateKey *rsa.PrivateKey
+	PublicKey  string `json:"-"`
+	KeyID      string `json:"-"`
 }
 
 func GetProjectByPKHash(hash string) (*Project, error) {
@@ -25,11 +28,41 @@ func GetProjectByPKHash(hash string) (*Project, error) {
 	log.Println("Hash:", hash)
 
 	err := db.AuthPool.QueryRow(ctx,
-		`SELECT project_id, jwt_secret
+		`SELECT project_id, private_key, key_id
 		FROM auth_projects
 		WHERE publishable_key_hash=$1`,
 		hash,
-	).Scan(&p.ID, &p.JWTSecret)
+	).Scan(&p.ID, &p.PrivateKey, &p.KeyID)
+
+	// println("err", err.Error())
+
+	if err != nil {
+		log.Println("Error:", err.Error())
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("project not found")
+		}
+
+		return nil, err
+	}
+
+	return &p, nil
+
+}
+
+func GetProjectById(projectID string) (*Project, error) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var p Project
+	log.Println("Hash:", projectID)
+
+	err := db.AuthPool.QueryRow(ctx,
+		`SELECT project_id, public_key, key_id
+		FROM auth_projects
+		WHERE project_id=$1`,
+		projectID,
+	).Scan(&p.ID, &p.PublicKey, &p.KeyID)
 
 	// println("err", err.Error())
 
@@ -50,18 +83,19 @@ func GetProjectByPKHash(hash string) (*Project, error) {
 // USER
 //////////////////////////////////////////////////////
 
-func GetUser(projectID, email string) (string, string, error) {
+func GetUser(projectID, email string) (*User, string, error) {
 
-	var id, pw string
+	var user User
+	var pw string
 
 	err := db.AuthPool.QueryRow(context.Background(),
-		`SELECT id,password_hash
+		`SELECT id, email, password_hash, email_verified
 		 FROM auth_users
 		 WHERE project_id=$1 AND email=$2`,
 		projectID, email,
-	).Scan(&id, &pw)
+	).Scan(&user.ID, &user.Email, &pw, &user.EmailVerified)
 
-	return id, pw, err
+	return &user, pw, err
 }
 
 func UpdatePassword(userID, hash string) error {
@@ -83,11 +117,11 @@ func GetProjectBySecretHash(hash string) (*Project, error) {
 
 	err := db.AuthPool.QueryRow(
 		context.Background(),
-		`SELECT project_id, jwt_secret
+		`SELECT project_id, private_key
 		 FROM auth_projects
 		 WHERE secret_key_hash=$1`,
 		hash,
-	).Scan(&p.ID, &p.JWTSecret)
+	).Scan(&p.ID, &p.PrivateKey)
 
 	if err != nil {
 		return nil, err
@@ -108,4 +142,30 @@ func UpdateJWTSecret(projectID, secret string) error {
 
 	return err
 
+}
+
+func UpdateProjectKeys(
+	projectID string,
+	privateKey string,
+	publicKey string,
+	keyID string,
+) error {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := db.AuthPool.Exec(ctx, `
+	UPDATE auth_projects
+	SET private_key = $1,
+	    public_key  = $2,
+	    key_id      = $3
+	WHERE project_id = $4
+	`,
+		privateKey,
+		publicKey,
+		keyID,
+		projectID,
+	)
+
+	return err
 }

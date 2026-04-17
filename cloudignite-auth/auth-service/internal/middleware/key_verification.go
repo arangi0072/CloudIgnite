@@ -13,6 +13,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+type Project struct {
+	ID        string `json:"project_id"`
+	JWTSecret string `json:"-"`
+}
+
 func ProjectMiddleware() gin.HandlerFunc {
 
 	return func(c *gin.Context) {
@@ -44,78 +49,58 @@ func ProjectMiddleware() gin.HandlerFunc {
 }
 
 func JWTMiddleware() gin.HandlerFunc {
-
 	return func(c *gin.Context) {
 
 		auth := c.GetHeader("Authorization")
-
 		if auth == "" {
-			c.AbortWithStatusJSON(401,
-				gin.H{"error": "missing token"})
+			c.AbortWithStatusJSON(401, gin.H{"error": "missing token"})
 			return
 		}
 
-		tokenString :=
-			strings.TrimPrefix(auth, "Bearer ")
+		tokenString := strings.TrimPrefix(auth, "Bearer ")
 
-		//////////////////////////////////////////////////
-		// Parse unverified ONLY to read pid
-		//////////////////////////////////////////////////
-
-		parser := jwt.NewParser(
-			jwt.WithoutClaimsValidation(),
-		)
-
-		unverified := &utils.AccessClaims{}
-
-		_, _, err := parser.ParseUnverified(
-			tokenString,
-			unverified,
-		)
-
+		// 🔥 Step 1: Parse token WITHOUT verifying (to get kid)
+		token, _, err := new(jwt.Parser).ParseUnverified(tokenString, &utils.AccessClaims{})
 		if err != nil {
-			c.AbortWithStatusJSON(401,
-				gin.H{"error": "invalid token"})
+			c.AbortWithStatusJSON(401, gin.H{"error": "invalid token format"})
 			return
 		}
 
-		//////////////////////////////////////////////////
-		// Fetch secret
-		//////////////////////////////////////////////////
+		// 🔥 Step 2: Extract KID
+		kid, ok := token.Header["kid"].(string)
+		if !ok || kid == "" {
+			c.AbortWithStatusJSON(401, gin.H{"error": "missing kid"})
+			return
+		}
 
-		secret, err :=
-			repository.GetProjectJWTSecret(
-				unverified.ProjectID,
-			)
-
+		// 🔥 Step 3: Get public key (cache or auth service)
+		publicKey, err := utils.GetPublicKeyByKID(kid)
 		if err != nil {
-			c.AbortWithStatusJSON(401,
-				gin.H{"error": "project not found"})
+			c.AbortWithStatusJSON(401, gin.H{"error": "key not found"})
 			return
 		}
 
-		//////////////////////////////////////////////////
-		// VERIFY
-		//////////////////////////////////////////////////
-
-		claims, err :=
-			utils.VerifyAccessToken(
-				tokenString,
-				secret,
-			)
-
+		// 🔥 Step 4: Verify token
+		claims, err := utils.VerifyAccessToken(tokenString, publicKey)
 		if err != nil {
-			c.AbortWithStatusJSON(401,
-				gin.H{"error": "invalid or expired"})
+			c.AbortWithStatusJSON(401, gin.H{"error": "invalid token"})
 			return
 		}
 
-		//////////////////////////////////////////////////
-		// Attach context
-		//////////////////////////////////////////////////
+		// 🔐 Extra validation (VERY IMPORTANT)
+		if claims.Issuer != "cloudignite-auth" {
+			c.AbortWithStatusJSON(401, gin.H{"error": "invalid issuer"})
+			return
+		}
 
+		// Optional (recommended)
+		if len(claims.Audience) == 0 {
+			c.AbortWithStatusJSON(401, gin.H{"error": "invalid audience"})
+			return
+		}
+
+		// 🔥 Set context
 		c.Set("user_id", claims.UserID)
-		c.Set("email", claims.Email)
 		c.Set("project_id", claims.ProjectID)
 
 		c.Next()

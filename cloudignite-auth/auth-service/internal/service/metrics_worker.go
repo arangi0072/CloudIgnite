@@ -16,14 +16,16 @@ func ProcessUsageSync() {
 
 	ctx := context.Background()
 
-	// 🔍 Scan all usage keys
-	keys, err := utils.RedisClient.Keys(ctx, "usage:*").Result()
+	// =========================
+	// 🔥 MONTHLY SYNC
+	// =========================
+	monthlyKeys, err := utils.RedisClient.Keys(ctx, "usage:*").Result()
 	if err != nil {
-		log.Println("Redis scan error:", err)
+		log.Println("Redis monthly scan error:", err)
 		return
 	}
 
-	for _, key := range keys {
+	for _, key := range monthlyKeys {
 
 		// usage:project:service:metric:month
 		parts := strings.Split(key, ":")
@@ -42,10 +44,11 @@ func ProcessUsageSync() {
 			continue
 		}
 
-		// 🗓 parse month
-		periodStart, _ := time.Parse("2006-01", month)
+		periodStart, err := time.Parse("2006-01", month)
+		if err != nil {
+			continue
+		}
 
-		// 🔥 UPSERT monthly
 		_, err = db.Pool.Exec(ctx, `
 			INSERT INTO project_usage (
 				id, project_id, service, metric_type, period_start, usage_count
@@ -66,9 +69,40 @@ func ProcessUsageSync() {
 			log.Println("DB monthly error:", err)
 			continue
 		}
+	}
 
-		// 📅 DAILY
-		today := time.Now().UTC().Format("2006-01-02")
+	// =========================
+	// 📅 DAILY SYNC
+	// =========================
+	dailyKeys, err := utils.RedisClient.Keys(ctx, "usage_daily:*").Result()
+	if err != nil {
+		log.Println("Redis daily scan error:", err)
+		return
+	}
+
+	for _, key := range dailyKeys {
+
+		// usage_daily:project:service:metric:date
+		parts := strings.Split(key, ":")
+
+		if len(parts) != 5 {
+			continue
+		}
+
+		projectID := parts[1]
+		service := parts[2]
+		metric := parts[3]
+		date := parts[4]
+
+		count, err := utils.RedisClient.Get(ctx, key).Int64()
+		if err != nil {
+			continue
+		}
+
+		parsedDate, err := time.Parse("2006-01-02", date)
+		if err != nil {
+			continue
+		}
 
 		_, err = db.Pool.Exec(ctx, `
 			INSERT INTO project_usage_daily (
@@ -82,7 +116,7 @@ func ProcessUsageSync() {
 			projectID,
 			service,
 			metric,
-			today,
+			parsedDate,
 			count,
 		)
 

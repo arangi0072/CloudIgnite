@@ -3,6 +3,7 @@ package service
 import (
 	"auth-service/internal/repository"
 	"auth-service/internal/utils"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -30,42 +31,44 @@ func Signup(projectID, email, password string) error {
 
 func Login(
 	projectID,
-	jwtSecret,
 	email,
 	password,
 	ip,
 	userAgent string,
-) (string, string, error) {
+	privateKey *rsa.PrivateKey,
+	keyID string,
+) (string, string, *repository.User, error) {
 
-	userID, passwordHash, err :=
+	//////////////////////////////////////////////////
+	// GET USER
+	//////////////////////////////////////////////////
+
+	user, passwordHash, err :=
 		repository.GetUser(projectID, email)
 
 	if err != nil {
-		// println("password hash", passwordHash, "  err ", err)
-		return "", "", errors.New("invalid credentials")
+		return "", "", nil, errors.New("invalid credentials")
 	}
 
 	err = utils.ComparePassword(passwordHash, password)
 	if err != nil {
-		// println("password hash compare", passwordHash, "  err ", err)
-		return "", "", errors.New("invalid credentials")
+		return "", "", nil, errors.New("invalid credentials")
 	}
 
 	//////////////////////////////////////////////////
-	// CREATE REFRESH
+	// CREATE REFRESH TOKEN
 	//////////////////////////////////////////////////
 
 	refreshRaw, refreshHash, err :=
 		utils.GenerateRefreshToken()
 
 	if err != nil {
-		// println("refresh token generate", refreshHash, "  err ", err)
-		return "", "", err
+		return "", "", nil, err
 	}
 
 	err = repository.CreateSession(
 		projectID,
-		userID,
+		user.ID,
 		refreshHash,
 		email,
 		ip,
@@ -73,28 +76,27 @@ func Login(
 	)
 
 	if err != nil {
-		// println("create session", refreshHash, "  err ", err)
-		return "", "", err
+		return "", "", nil, err
 	}
 
 	//////////////////////////////////////////////////
-	// CREATE ACCESS TOKEN
+	// CREATE ACCESS TOKEN (RS256)
 	//////////////////////////////////////////////////
 
 	accessToken, err :=
 		utils.GenerateAccessToken(
-			userID,
+			user.ID,
 			projectID,
 			email,
-			jwtSecret,
+			privateKey,
+			keyID,
 		)
 
 	if err != nil {
-		println("access err", err)
-		return "", "", err
+		return "", "", nil, err
 	}
 
-	return accessToken, refreshRaw, nil
+	return accessToken, refreshRaw, user, nil
 }
 
 //////////////////////////////////////////////////////
@@ -103,9 +105,10 @@ func Login(
 
 func RefreshToken(
 	refreshRaw,
-	jwtSecret string,
 	ip,
 	userAgent string,
+	privateKey *rsa.PrivateKey,
+	keyID string,
 ) (string, string, error) {
 
 	hashBytes := sha256.Sum256([]byte(refreshRaw))
@@ -153,7 +156,8 @@ func RefreshToken(
 			userID,
 			projectID,
 			email,
-			jwtSecret,
+			privateKey,
+			keyID,
 		)
 
 	if err != nil {
@@ -199,7 +203,7 @@ func ForgotPassword(projectID, email string) error {
 
 	repository.CreateVerificationToken(
 		projectID,
-		userID,
+		userID.ID,
 		hash,
 		"password_reset",
 		time.Now().Add(1*time.Hour),
