@@ -94,6 +94,8 @@ func main() {
 
 	})
 
+	router.GET("/.well-known/jwks/:project_id", handler.GetJWKS)
+
 	// Auth routes
 
 	auth := router.Group("/v1/auth")
@@ -137,7 +139,7 @@ func main() {
 
 	admin.POST("/users", handler.AdminCreateUser)
 	admin.GET("/users", handler.AdminListUsers)
-	admin.POST("/projects/:id/rotate-jwt-secret", handler.RotateJWTSecret)
+	admin.POST("/projects/:id/rotate-jwt-secret", handler.RotateKeys)
 	admin.DELETE("/users/:id", handler.AdminDeleteUser)
 	admin.POST("/users/:id/disable", handler.AdminDisableUser)
 	admin.POST("/users/:id/revoke-sessions", handler.AdminRevokeSessions)

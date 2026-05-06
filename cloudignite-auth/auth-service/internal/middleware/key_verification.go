@@ -13,11 +13,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-type Project struct {
-	ID        string `json:"project_id"`
-	JWTSecret string `json:"-"`
-}
-
 func ProjectMiddleware() gin.HandlerFunc {
 
 	return func(c *gin.Context) {
@@ -51,6 +46,15 @@ func ProjectMiddleware() gin.HandlerFunc {
 func JWTMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 
+		// 🔥 0. Get project from previous middleware
+		projectVal, exists := c.Get("project")
+		if !exists {
+			c.AbortWithStatusJSON(401, gin.H{"error": "project not found"})
+			return
+		}
+		project := projectVal.(*repository.Project)
+
+		// 🔥 1. Get token
 		auth := c.GetHeader("Authorization")
 		if auth == "" {
 			c.AbortWithStatusJSON(401, gin.H{"error": "missing token"})
@@ -59,48 +63,58 @@ func JWTMiddleware() gin.HandlerFunc {
 
 		tokenString := strings.TrimPrefix(auth, "Bearer ")
 
-		// 🔥 Step 1: Parse token WITHOUT verifying (to get kid)
+		// 🔥 2. Parse unverified (get kid)
 		token, _, err := new(jwt.Parser).ParseUnverified(tokenString, &utils.AccessClaims{})
 		if err != nil {
 			c.AbortWithStatusJSON(401, gin.H{"error": "invalid token format"})
 			return
 		}
 
-		// 🔥 Step 2: Extract KID
 		kid, ok := token.Header["kid"].(string)
 		if !ok || kid == "" {
 			c.AbortWithStatusJSON(401, gin.H{"error": "missing kid"})
 			return
 		}
 
-		// 🔥 Step 3: Get public key (cache or auth service)
-		publicKey, err := utils.GetPublicKeyByKID(kid)
+		// 🔥 3. Fetch public key USING project_id
+		publicKey, err := utils.GetPublicKeyByKID(project.ID, kid)
 		if err != nil {
 			c.AbortWithStatusJSON(401, gin.H{"error": "key not found"})
 			return
 		}
 
-		// 🔥 Step 4: Verify token
+		// 🔥 4. Verify token
 		claims, err := utils.VerifyAccessToken(tokenString, publicKey)
 		if err != nil {
+			print(err.Error(), "  ", publicKey, "   token. ", tokenString)
 			c.AbortWithStatusJSON(401, gin.H{"error": "invalid token"})
 			return
 		}
 
-		// 🔐 Extra validation (VERY IMPORTANT)
-		if claims.Issuer != "cloudignite-auth" {
+		// 🔐 5. STRONG VALIDATION (multi-tenant safety)
+
+		// issuer check
+		expectedIssuer := "cloudignite-auth"
+		if claims.Issuer != expectedIssuer {
 			c.AbortWithStatusJSON(401, gin.H{"error": "invalid issuer"})
 			return
 		}
 
-		// Optional (recommended)
-		if len(claims.Audience) == 0 {
-			c.AbortWithStatusJSON(401, gin.H{"error": "invalid audience"})
+		// 		// audience check
+		// 		if len(claims.Audience) == 0 || !claims.Audience.Contains(project.ID) {
+		// 	c.AbortWithStatusJSON(401, gin.H{"error": "invalid audience"})
+		// 	return
+		// }
+
+		// project isolation check
+		if claims.ProjectID != project.ID {
+			c.AbortWithStatusJSON(401, gin.H{"error": "project mismatch"})
 			return
 		}
 
-		// 🔥 Set context
+		// 🔥 6. Set context
 		c.Set("user_id", claims.UserID)
+		c.Set("email", claims.Email)
 		c.Set("project_id", claims.ProjectID)
 
 		c.Next()

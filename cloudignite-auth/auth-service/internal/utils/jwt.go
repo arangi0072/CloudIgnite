@@ -7,6 +7,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
+	"math/big"
 	"time"
 
 	"crypto/x509"
@@ -129,34 +132,81 @@ var (
 // GET PUBLIC KEY BY KID
 //////////////////////////////////////////////////////
 
-func GetPublicKeyByKID(kid string) (*rsa.PublicKey, error) {
+type JWK struct {
+	Kid string `json:"kid"`
+	Kty string `json:"kty"`
+	N   string `json:"n"`
+	E   string `json:"e"`
+	Alg string `json:"alg"`
+	Use string `json:"use"`
+}
 
-	// 🔥 1. Check cache
-	mu.RLock()
-	if key, ok := keyCache[kid]; ok {
-		mu.RUnlock()
-		return key, nil
-	}
-	mu.RUnlock()
+type JWKS struct {
+	Keys []struct {
+		Kid       string `json:"kid"`
+		PublicKey string `json:"public_key"`
+	} `json:"keys"`
+}
 
-	// 🔥 2. Fetch from auth service
-	pubKeyPEM, err := fetchPublicKeyFromAuth(kid)
+func buildRSAPublicKey(jwk JWK) (*rsa.PublicKey, error) {
+
+	nBytes, err := base64.RawURLEncoding.DecodeString(jwk.N)
 	if err != nil {
 		return nil, err
 	}
 
-	// 🔥 3. Parse PEM → RSA
-	pubKey, err := ParsePublicKey(pubKeyPEM)
+	eBytes, err := base64.RawURLEncoding.DecodeString(jwk.E)
 	if err != nil {
 		return nil, err
 	}
 
-	// 🔥 4. Store in cache
-	mu.Lock()
-	keyCache[kid] = pubKey
-	mu.Unlock()
+	n := new(big.Int).SetBytes(nBytes)
+	e := int(new(big.Int).SetBytes(eBytes).Int64())
 
-	return pubKey, nil
+	return &rsa.PublicKey{
+		N: n,
+		E: e,
+	}, nil
+}
+
+func fetchJWKS(projectID string) (*JWKS, error) {
+	url := fmt.Sprintf("http://localhost:8081/.well-known/jwks/%s", projectID)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	var jwks JWKS
+	if err := json.Unmarshal(body, &jwks); err != nil {
+		return nil, fmt.Errorf("parse error: %w\nRaw: %s", err, string(body))
+	}
+
+	return &jwks, nil
+}
+func GetPublicKeyByKID(projectID string, kid string) (*rsa.PublicKey, error) {
+
+	jwks, err := fetchJWKS(projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, k := range jwks.Keys {
+		if k.Kid == kid {
+
+			block, _ := pem.Decode([]byte(k.PublicKey))
+			if block == nil {
+				return nil, errors.New("invalid PEM")
+			}
+
+			return x509.ParsePKCS1PublicKey(block.Bytes)
+		}
+	}
+
+	return nil, errors.New("kid not found")
 }
 
 //////////////////////////////////////////////////////

@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"log"
 	"time"
@@ -26,13 +28,24 @@ func GetProjectByPKHash(hash string) (*Project, error) {
 
 	var p Project
 	log.Println("Hash:", hash)
+	var privKeyStr string
 
 	err := db.AuthPool.QueryRow(ctx,
 		`SELECT project_id, private_key, key_id
 		FROM auth_projects
 		WHERE publishable_key_hash=$1`,
 		hash,
-	).Scan(&p.ID, &p.PrivateKey, &p.KeyID)
+	).Scan(&p.ID, &privKeyStr, &p.KeyID)
+
+	block, _ := pem.Decode([]byte(privKeyStr))
+	if block == nil {
+		return nil, errors.New("failed to decode PEM")
+	}
+
+	p.PrivateKey, err = x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
 
 	// println("err", err.Error())
 
