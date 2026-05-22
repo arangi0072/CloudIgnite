@@ -1,0 +1,76 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 252 10% 9%;
+    --foreground: 0 0% 98%;
+    --card: 252 10% 12%;
+    --card-foreground: 0 0% 98%;
+    --popover: 252 10% 9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 245 55% 45%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 252 10% 15%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 252 10% 15%;
+    --muted-foreground: 252 5% 70%;
+    --accent: 199 86% 62%;
+    --accent-foreground: 252 10% 9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 252 10% 18%;
+    --input: 252 10% 18%;
+    --ring: 245 55% 45%;
+    --radius: 1.25rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground selection:bg-accent/30 selection:text-accent;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+.glass-card {
+  @apply bg-card/40 backdrop-blur-xl border border-white/10 shadow-2xl;
+}
+
+.text-gradient {
+  @apply bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-white/60;
+}
+
+.accent-gradient {
+  @apply bg-gradient-to-r from-primary to-accent;
+}
+
+.grid-bg {
+  background-image: linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+@keyframes float {
+  0% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-20px) rotate(5deg); }
+  100% { transform: translateY(0px) rotate(0deg); }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+@keyframes scroll-x {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-scroll-x {
+  animation: scroll-x 30s linear infinite;
+}

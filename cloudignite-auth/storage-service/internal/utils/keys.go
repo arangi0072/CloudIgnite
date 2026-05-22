@@ -3,11 +3,14 @@ package utils
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"time"
 
 	"storage-service/internal/db"
 
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -75,4 +78,27 @@ func ResolveObjectKey(inputKey string, filename string) string {
 
 	// full key already
 	return inputKey
+}
+
+func GenerateUploadToken(objectID uuid.UUID, projectID string) (string, error) {
+	claims := jwt.MapClaims{
+		"object_id":  objectID.String(),
+		"project_id": projectID,
+		"exp":        time.Now().Add(10 * time.Minute).Unix(),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(os.Getenv("UPLOAD_SECRET")))
+}
+
+func VerifyUploadToken(tokenStr string) (jwt.MapClaims, error) {
+	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+		return []byte(os.Getenv("UPLOAD_SECRET")), nil
+	})
+
+	if err != nil || !token.Valid {
+		return nil, err
+	}
+
+	return token.Claims.(jwt.MapClaims), nil
 }
