@@ -61,10 +61,18 @@ func VerifyAccessToken(
 // GENERATE ACCESS TOKEN (RS256)
 //////////////////////////////////////////////////////
 
+// ============================================
+// GENERATE ACCESS TOKEN
+// ============================================
+
 func GenerateAccessToken(
 	userID string,
 	projectID string,
 	email string,
+
+	sessionID string,
+	deviceID string,
+
 	privateKey *rsa.PrivateKey,
 	keyID string,
 ) (string, error) {
@@ -76,14 +84,22 @@ func GenerateAccessToken(
 		ProjectID: projectID,
 		Email:     email,
 
+		SessionID: sessionID,
+		DeviceID:  deviceID,
+
 		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   userID,
-			Issuer:    "cloudignite-auth",
-			Audience:  jwt.ClaimStrings{projectID},
-			ExpiresAt: jwt.NewNumericDate(now.Add(15 * time.Minute)),
+			Subject:  userID,
+			Issuer:   "cloudignite-auth",
+			Audience: jwt.ClaimStrings{projectID},
+
+			ExpiresAt: jwt.NewNumericDate(
+				now.Add(15 * time.Minute),
+			),
+
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(now),
-			ID:        uuid.New().String(),
+
+			ID: uuid.New().String(), // jti
 		},
 	}
 
@@ -92,7 +108,6 @@ func GenerateAccessToken(
 		claims,
 	)
 
-	// 🔥 IMPORTANT: key id for JWKS
 	token.Header["kid"] = keyID
 
 	return token.SignedString(privateKey)

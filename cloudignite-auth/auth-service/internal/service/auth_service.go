@@ -25,16 +25,22 @@ func Signup(projectID, email, password string) error {
 	return repository.CreateUser(projectID, email, hash)
 }
 
-//////////////////////////////////////////////////////
-// LOGIN
-//////////////////////////////////////////////////////
+// ============================================
+// SERVICE LOGIN
+// ============================================
 
 func Login(
 	projectID,
 	email,
 	password,
+
+	deviceID,
+	deviceName,
+	fingerprint,
+
 	ip,
 	userAgent string,
+
 	privateKey *rsa.PrivateKey,
 	keyID string,
 ) (string, string, *repository.User, error) {
@@ -56,20 +62,30 @@ func Login(
 	}
 
 	//////////////////////////////////////////////////
-	// CREATE REFRESH TOKEN
+	// FIND OR CREATE DEVICE
 	//////////////////////////////////////////////////
 
-	refreshRaw, refreshHash, err :=
-		utils.GenerateRefreshToken()
+	device, err := repository.FindOrCreateDevice(
+		projectID,
+		user.ID,
+		deviceID,
+		deviceName,
+		fingerprint,
+		ip,
+	)
 
 	if err != nil {
 		return "", "", nil, err
 	}
 
-	err = repository.CreateSession(
+	//////////////////////////////////////////////////
+	// CREATE SESSION
+	//////////////////////////////////////////////////
+
+	sessionID, err := repository.CreateSession(
 		projectID,
 		user.ID,
-		refreshHash,
+		device.ID,
 		email,
 		ip,
 		userAgent,
@@ -80,7 +96,27 @@ func Login(
 	}
 
 	//////////////////////////////////////////////////
-	// CREATE ACCESS TOKEN (RS256)
+	// CREATE REFRESH TOKEN
+	//////////////////////////////////////////////////
+
+	refreshRaw, refreshHash, err :=
+		utils.GenerateRefreshToken()
+
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	err = repository.CreateRefreshToken(
+		sessionID,
+		refreshHash,
+	)
+
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	//////////////////////////////////////////////////
+	// CREATE ACCESS TOKEN
 	//////////////////////////////////////////////////
 
 	accessToken, err :=
@@ -88,6 +124,10 @@ func Login(
 			user.ID,
 			projectID,
 			email,
+
+			sessionID,
+			device.ID,
+
 			privateKey,
 			keyID,
 		)
@@ -99,77 +139,15 @@ func Login(
 	return accessToken, refreshRaw, user, nil
 }
 
-//////////////////////////////////////////////////////
-// REFRESH TOKEN
-//////////////////////////////////////////////////////
+func LogoutAll(
+	projectID,
+	userID string,
+) error {
 
-func RefreshToken(
-	refreshRaw,
-	ip,
-	userAgent string,
-	privateKey *rsa.PrivateKey,
-	keyID string,
-) (string, string, error) {
-
-	hashBytes := sha256.Sum256([]byte(refreshRaw))
-	hash := hex.EncodeToString(hashBytes[:])
-
-	userID, projectID, email, err :=
-		repository.GetSession(hash)
-
-	if err != nil {
-		return "", "", errors.New("invalid refresh token")
-	}
-
-	//////////////////////////////////////////////////
-	// ROTATE TOKEN
-	//////////////////////////////////////////////////
-
-	repository.RevokeSession(hash, userID)
-
-	newRaw, newHash, err :=
-		utils.GenerateRefreshToken()
-
-	if err != nil {
-		return "", "", err
-	}
-
-	err = repository.CreateSession(
+	return repository.RevokeAll(
 		projectID,
 		userID,
-		newHash,
-		email,
-		ip,
-		userAgent,
 	)
-
-	if err != nil {
-		return "", "", err
-	}
-
-	//////////////////////////////////////////////////
-	// NEW ACCESS
-	//////////////////////////////////////////////////
-
-	accessToken, err :=
-		utils.GenerateAccessToken(
-			userID,
-			projectID,
-			email,
-			privateKey,
-			keyID,
-		)
-
-	if err != nil {
-		return "", "", err
-	}
-
-	return accessToken, newRaw, nil
-}
-
-func LogoutAll(projectID, userID string) {
-
-	repository.RevokeAll(projectID, userID)
 }
 
 func VerifyEmail(rawToken string) error {

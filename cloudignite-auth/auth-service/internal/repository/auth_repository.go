@@ -182,3 +182,112 @@ func UpdateProjectKeys(
 
 	return err
 }
+
+// ============================================
+// FIND OR CREATE DEVICE
+// ============================================
+
+type Device struct {
+	ID string
+}
+
+func FindOrCreateDevice(
+	projectID,
+	userID,
+	deviceID,
+	deviceName,
+	fingerprint,
+	ip string,
+) (*Device, error) {
+
+	var device Device
+
+	err := db.AuthPool.QueryRow(
+		context.Background(),
+		`
+		SELECT id
+		FROM auth_devices
+		WHERE id = $1
+		AND user_id = $2
+		AND project_id = $3
+		`,
+		deviceID,
+		userID,
+		projectID,
+	).Scan(&device.ID)
+
+	if err == nil {
+		_, _ = db.AuthPool.Exec(
+			context.Background(),
+			`
+			UPDATE auth_devices
+			SET
+				last_seen = NOW(),
+				last_ip = $1
+			WHERE id = $2
+			`,
+			ip,
+			deviceID,
+		)
+
+		return &device, nil
+	}
+
+	_, err = db.AuthPool.Exec(
+		context.Background(),
+		`
+		INSERT INTO auth_devices (
+			id,
+			project_id,
+			user_id,
+			fingerprint_hash,
+			device_name,
+			first_ip,
+			last_ip
+		)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		`,
+		deviceID,
+		projectID,
+		userID,
+		fingerprint,
+		deviceName,
+		ip,
+		ip,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	device.ID = deviceID
+
+	return &device, nil
+}
+
+// ============================================
+// CREATE REFRESH TOKEN
+// ============================================
+
+func CreateRefreshToken(
+	sessionID string,
+	refreshHash string,
+) error {
+
+	_, err := db.AuthPool.Exec(
+		context.Background(),
+		`
+		INSERT INTO auth_refresh_tokens (
+			session_id,
+			refresh_token_hash,
+			expires_at
+		)
+		VALUES ($1,$2,$3)
+		`,
+		sessionID,
+		refreshHash,
+		time.Now().Add(30*24*time.Hour),
+	)
+
+	return err
+}

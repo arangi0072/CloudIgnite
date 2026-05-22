@@ -4,8 +4,6 @@ import (
 	"auth-service/internal/repository"
 	"auth-service/internal/service"
 	"auth-service/internal/utils"
-	"crypto/sha256"
-	"encoding/hex"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -49,6 +47,9 @@ func Signup(c *gin.Context) {
 //////////////////////////////////////////////////////
 // LOGIN
 //////////////////////////////////////////////////////
+// ============================================
+// LOGIN CONTROLLER
+// ============================================
 
 func Login(c *gin.Context) {
 
@@ -57,6 +58,10 @@ func Login(c *gin.Context) {
 	var body struct {
 		Email    string `json:"email" binding:"required,email"`
 		Password string `json:"password" binding:"required"`
+
+		DeviceID    string `json:"device_id" binding:"required"`
+		DeviceName  string `json:"device_name"`
+		Fingerprint string `json:"fingerprint"`
 	}
 
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -70,10 +75,17 @@ func Login(c *gin.Context) {
 
 	access, refresh, user, err := service.Login(
 		project.ID,
+
 		body.Email,
 		body.Password,
+
+		body.DeviceID,
+		body.DeviceName,
+		body.Fingerprint,
+
 		ip,
 		userAgent,
+
 		project.PrivateKey,
 		project.KeyID,
 	)
@@ -87,8 +99,9 @@ func Login(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"access_token":  access,
 		"refresh_token": refresh,
-		"expires_in":    240, // 🔥 add this
-		"user": gin.H{ // 🔥 add this
+		"expires_in":    900,
+
+		"user": gin.H{
 			"id":       user.ID,
 			"email":    user.Email,
 			"verified": user.EmailVerified,
@@ -97,70 +110,36 @@ func Login(c *gin.Context) {
 }
 
 //////////////////////////////////////////////////////
-// REFRESH TOKEN
+// LOGOUT
 //////////////////////////////////////////////////////
 
-func Token(c *gin.Context) {
+//////////////////////////////////////////////////////
+// LOGOUT CURRENT SESSION
+//////////////////////////////////////////////////////
 
-	project := c.MustGet("project").(*repository.Project)
+func Logout(c *gin.Context) {
 
-	var body struct {
-		RefreshToken string `json:"refresh_token" binding:"required"`
-	}
+	sessionID := c.GetString("session_id")
 
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest,
-			gin.H{"error": err.Error()})
+	if sessionID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "missing session",
+		})
 		return
 	}
 
-	access, refresh, err :=
-		service.RefreshToken(
-			body.RefreshToken,
-			c.ClientIP(),
-			c.Request.UserAgent(),
-			project.PrivateKey,
-			project.KeyID,
-		)
+	err := repository.RevokeSession(sessionID)
 
 	if err != nil {
-		c.JSON(http.StatusUnauthorized,
-			gin.H{"error": "invalid refresh token"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to revoke session",
+		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"access_token":  access,
-		"refresh_token": refresh,
+		"status": "logged out",
 	})
-}
-
-//////////////////////////////////////////////////////
-// LOGOUT
-//////////////////////////////////////////////////////
-
-func Logout(c *gin.Context) {
-	userID := c.GetString("user_id")
-
-	var body struct {
-		RefreshToken string `json:"refresh_token" binding:"required"`
-	}
-
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest,
-			gin.H{"error": err.Error()})
-		return
-	}
-
-	hash := sha256.Sum256([]byte(body.RefreshToken))
-
-	repository.RevokeSession(
-		hex.EncodeToString(hash[:]),
-		userID,
-	)
-
-	c.JSON(http.StatusOK,
-		gin.H{"status": "logged out"})
 }
 
 func Me(c *gin.Context) {
@@ -179,14 +158,28 @@ func Me(c *gin.Context) {
 	c.JSON(http.StatusOK, user)
 }
 
+//////////////////////////////////////////////////////
+// LOGOUT ALL SESSIONS
+//////////////////////////////////////////////////////
+
 func LogoutAll(c *gin.Context) {
 
 	projectID := c.GetString("project_id")
 	userID := c.GetString("user_id")
 
-	service.LogoutAll(projectID, userID)
+	err := service.LogoutAll(
+		projectID,
+		userID,
+	)
 
-	c.JSON(200, gin.H{
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to revoke sessions",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
 		"status": "all sessions revoked",
 	})
 }
@@ -258,30 +251,87 @@ func Refresh(c *gin.Context) {
 	}
 
 	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid request",
+		})
 		return
 	}
 
 	project := c.MustGet("project").(*repository.Project)
 
-	// hash incoming token
+	//////////////////////////////////////////////////
+	// HASH TOKEN
+	//////////////////////////////////////////////////
+
 	hash := utils.HashToken(req.RefreshToken)
 
-	// get session
-	userID, projectID, email, err := repository.GetSession(hash)
-	println("req", req.RefreshToken)
-	println("user id", userID, "project id", projectID, "email", email, "err", err)
-	println("refresh token", req.RefreshToken)
-	println("hash", hash)
+	//////////////////////////////////////////////////
+	// GET REFRESH TOKEN
+	//////////////////////////////////////////////////
+
+	refreshToken, err :=
+		repository.GetRefreshToken(hash)
+
 	if err != nil {
-		println("error", err.Error())
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error": "invalid refresh token",
 		})
 		return
 	}
 
-	// 🚨 DELETE OLD TOKEN (rotation step)
-	err = repository.DeleteSession(hash)
+	//////////////////////////////////////////////////
+	// REPLAY DETECTION
+	//////////////////////////////////////////////////
+
+	if refreshToken.UsedAt.Valid {
+
+		// 🚨 replay attack detected
+
+		_ = repository.RevokeSession(refreshToken.SessionID)
+
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "refresh token replay detected",
+		})
+
+		return
+	}
+
+	//////////////////////////////////////////////////
+	// GET SESSION
+	//////////////////////////////////////////////////
+
+	session, err := repository.GetSessionByID(
+		refreshToken.SessionID,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "invalid session",
+		})
+		return
+	}
+
+	//////////////////////////////////////////////////
+	// SESSION REVOKED?
+	//////////////////////////////////////////////////
+
+	if session.Revoked {
+
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "session revoked",
+		})
+
+		return
+	}
+
+	//////////////////////////////////////////////////
+	// MARK TOKEN USED
+	//////////////////////////////////////////////////
+
+	err = repository.MarkRefreshTokenUsed(
+		refreshToken.ID,
+	)
+
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "failed to rotate token",
@@ -289,44 +339,75 @@ func Refresh(c *gin.Context) {
 		return
 	}
 
-	// ✅ generate new access token
+	//////////////////////////////////////////////////
+	// CREATE NEW REFRESH TOKEN
+	//////////////////////////////////////////////////
+
+	newRefreshToken, newHash, err :=
+		utils.GenerateRefreshToken()
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to generate refresh token",
+		})
+		return
+	}
+
+	err = repository.CreateRefreshToken(
+		session.ID,
+		newHash,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to store refresh token",
+		})
+		return
+	}
+
+	//////////////////////////////////////////////////
+	// UPDATE SESSION LAST SEEN
+	//////////////////////////////////////////////////
+
+	_ = repository.UpdateSessionLastSeen(
+		session.ID,
+		c.ClientIP(),
+	)
+
+	//////////////////////////////////////////////////
+	// GENERATE NEW ACCESS TOKEN
+	//////////////////////////////////////////////////
+
 	accessToken, err := utils.GenerateAccessToken(
-		userID,
-		projectID,
-		email,
+		session.UserID,
+		session.ProjectID,
+		session.Email,
+
+		session.ID,
+		session.DeviceID,
+
 		project.PrivateKey,
 		project.KeyID,
 	)
+
 	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "failed to generate access token",
+		})
 		return
 	}
 
-	// ✅ generate new refresh token
-	newRefreshToken, newHash, err := utils.GenerateRefreshToken()
-	if err != nil {
-		return
-	}
+	//////////////////////////////////////////////////
+	// RESPONSE
+	//////////////////////////////////////////////////
 
-	// store new session
-	err = repository.CreateSession(
-		projectID,
-		userID,
-		newHash,
-		email,
-		c.ClientIP(),
-		c.Request.UserAgent(),
-	)
-	if err != nil {
-		return
-	}
-
-	// 🎯 return both tokens
 	c.JSON(http.StatusOK, gin.H{
 		"access_token":  accessToken,
 		"refresh_token": newRefreshToken,
-		"expires_in":    240,
+		"expires_in":    900,
 	})
 }
+
 func RotateKeys(c *gin.Context) {
 
 	projectID := c.Param("id")

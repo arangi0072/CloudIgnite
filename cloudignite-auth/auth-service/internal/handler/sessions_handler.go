@@ -48,9 +48,8 @@ func RevokeOtherSessions(c *gin.Context) {
 func RevokeSession(c *gin.Context) {
 
 	sessionID, _ := uuid.Parse(c.Param("id"))
-	userID := c.MustGet("user_id").(uuid.UUID)
 
-	err := service.RevokeSession(sessionID, userID)
+	err := service.RevokeSession(sessionID)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "failed to revoke session"})
 		return
