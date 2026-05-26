@@ -1,0 +1,169 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 223 19% 12%;
+    --foreground: 220 14% 96%;
+
+    --card: 223 19% 15%;
+    --card-foreground: 220 14% 96%;
+
+    --popover: 223 19% 12%;
+    --popover-foreground: 220 14% 96%;
+
+    --primary: 273 83% 72%;
+    --primary-foreground: 220 14% 10%;
+
+    --secondary: 223 19% 20%;
+    --secondary-foreground: 220 14% 96%;
+
+    --muted: 220 15% 25%;
+    --muted-foreground: 220 10% 65%;
+
+    --accent: 273 83% 69%;
+    --accent-foreground: 220 14% 96%;
+
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 220 15% 22%;
+    --input: 220 15% 22%;
+    --ring: 273 83% 75%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 223 19% 12%;
+    --sidebar-foreground: 220 10% 80%;
+    --sidebar-border: 220 15% 22%;
+    --sidebar-accent: 223 19% 20%;
+    --sidebar-accent-foreground: 220 14% 96%;
+    --sidebar-ring: 273 83% 75%;
+  }
+
+  .dark {
+    --background: 223 19% 12%;
+    --foreground: 220 14% 96%;
+
+    --card: 223 19% 15%;
+    --card-foreground: 220 14% 96%;
+
+    --popover: 223 19% 12%;
+    --popover-foreground: 220 14% 96%;
+
+    --primary: 273 83% 72%;
+    --primary-foreground: 220 14% 10%;
+
+    --secondary: 223 19% 20%;
+    --secondary-foreground: 220 14% 96%;
+
+    --muted: 220 15% 25%;
+    --muted-foreground: 220 10% 65%;
+
+    --accent: 273 83% 69%;
+    --accent-foreground: 220 14% 96%;
+
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 220 15% 22%;
+    --input: 220 15% 22%;
+    --ring: 273 83% 75%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 223 19% 12%;
+    --sidebar-foreground: 220 10% 80%;
+    --sidebar-border: 220 15% 22%;
+    --sidebar-accent: 223 19% 20%;
+    --sidebar-accent-foreground: 220 14% 96%;
+    --sidebar-ring: 273 83% 75%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+  }
+
+  .glow-bg {
+    background-image: radial-gradient(ellipse 80% 50% at 50% -20%,rgba(120,119,198,0.3), transparent);
+  }
+
+  .pillar-card {
+    @apply relative overflow-hidden rounded-2xl border p-8 shadow-2xl;
+    background: radial-gradient(100% 100% at 50% 0%, hsl(var(--card)) 0%, transparent 100%);
+  }
+
+  .pillar-card::before {
+    @apply content-[''] absolute inset-0 z-10 transition-all duration-500;
+    background: radial-gradient(400px circle at var(--x) var(--y), hsl(var(--accent) / 0.25), transparent 40%);
+    opacity: 0;
+  }
+
+  .pillar-card:hover::before {
+    opacity: 1;
+  }
+
+  .auth-layout-bg {
+    @apply fixed inset-0 -z-10 bg-background;
+    background-image: 
+      linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px),
+      radial-gradient(at 20% 20%, hsl(var(--primary) / 0.15) 0px, transparent 50%),
+      radial-gradient(at 80% 80%, hsl(var(--accent) / 0.15) 0px, transparent 50%);
+    background-size: 40px 40px, 40px 40px, auto, auto;
+  }
+  
+  .glass-card {
+    @apply rounded-2xl border border-white/10 bg-card/70 p-6 shadow-2xl backdrop-blur-lg transition-all duration-300 ease-in-out hover:shadow-primary/20 sm:p-8;
+  }
+
+  .prose {
+    @apply text-muted-foreground;
+  }
+  .prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6, .prose strong {
+    @apply text-foreground;
+  }
+  .prose h1 {
+    @apply font-headline text-4xl font-bold mb-8;
+  }
+  .prose h2 {
+    @apply font-headline text-2xl font-bold mt-12 mb-4 border-b border-border pb-2;
+  }
+  .prose p, .prose ul, .prose ol, .prose li {
+    @apply text-base leading-relaxed;
+  }
+  .prose ul {
+    @apply list-disc pl-6 space-y-2;
+  }
+  .prose ol {
+    @apply list-decimal pl-6 space-y-2;
+  }
+  .prose a {
+    @apply text-primary hover:underline;
+  }
+  .prose code {
+    @apply text-accent bg-secondary rounded-sm px-1 py-0.5 font-mono text-sm;
+  }
+  .prose pre {
+    @apply rounded-xl border bg-secondary/30 p-0;
+  }
+  .prose pre code {
+    @apply bg-transparent p-4 block overflow-x-auto;
+  }
+  .prose .lead {
+    @apply text-xl text-muted-foreground;
+  }
+  .prose blockquote {
+    @apply border-l-4 border-primary/50 pl-4 italic text-muted-foreground;
+  }
+}

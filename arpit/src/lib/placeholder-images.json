@@ -1,0 +1,28 @@
+{
+  "placeholderImages": [
+    {
+      "id": "founder-photo",
+      "description": "Professional portrait of a young tech founder",
+      "imageUrl": "https://picsum.photos/seed/founder/800/800",
+      "imageHint": "tech founder portrait"
+    },
+    {
+      "id": "project-cloudignite",
+      "description": "Cloud infrastructure dashboard preview",
+      "imageUrl": "https://picsum.photos/seed/cloud/600/400",
+      "imageHint": "cloud dashboard"
+    },
+    {
+      "id": "project-ignitecode",
+      "description": "IDE and code editor interface preview",
+      "imageUrl": "https://picsum.photos/seed/code/600/400",
+      "imageHint": "code editor"
+    },
+    {
+      "id": "project-database",
+      "description": "Data visualization and database architecture",
+      "imageUrl": "https://picsum.photos/seed/db/600/400",
+      "imageHint": "data architecture"
+    }
+  ]
+}
